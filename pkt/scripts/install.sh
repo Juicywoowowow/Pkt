@@ -156,7 +156,69 @@ auto_build() {
         return $?
     fi
     
+    # Check for Gradle (gradlew or build.gradle)
+    if [ -f "gradlew" ] || [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+        echo -e "${GREEN}Found Gradle project${RESET}"
+        
+        # Install gradle/java if needed
+        if ! command -v java &> /dev/null; then
+            echo -e "${YELLOW}Installing Java...${RESET}"
+            pkg install -y openjdk-17 2>/dev/null || apt install -y openjdk-17 2>/dev/null
+        fi
+        
+        if [ -f "gradlew" ]; then
+            # Use wrapper
+            chmod +x gradlew
+            ./gradlew build --no-daemon
+        else
+            # Install gradle if not present
+            if ! command -v gradle &> /dev/null; then
+                echo -e "${YELLOW}Installing Gradle...${RESET}"
+                pkg install -y gradle 2>/dev/null || apt install -y gradle 2>/dev/null
+            fi
+            gradle build --no-daemon
+        fi
+        
+        # Find and copy built jar or binary
+        find_gradle_output
+        return $?
+    fi
+    
     echo -e "${RED}No recognized build system found${RESET}"
+    return 1
+}
+
+# Find Gradle build output and copy
+find_gradle_output() {
+    # Look for jar files in build/libs
+    if [ -d "build/libs" ]; then
+        local jar=$(find build/libs -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" | head -1)
+        if [ -n "$jar" ]; then
+            cp "$jar" "$PKT_BIN/"
+            
+            # Create wrapper script to run the jar
+            local jar_name=$(basename "$jar")
+            cat > "$PKT_BIN/$PACKAGE" << EOF
+#!/bin/bash
+java -jar "\$HOME/.pkt/bin/$jar_name" "\$@"
+EOF
+            chmod +x "$PKT_BIN/$PACKAGE"
+            echo -e "${GREEN}Installed $jar_name with wrapper script${RESET}"
+            return 0
+        fi
+    fi
+    
+    # Look for native binary in build/native or build/bin
+    for dir in "build/native" "build/bin" "build/exe"; do
+        if [ -d "$dir" ]; then
+            find_and_copy_binary "$dir"
+            if [ $? -eq 0 ]; then
+                return 0
+            fi
+        fi
+    done
+    
+    echo -e "${YELLOW}No output binary/jar found, check build/libs manually${RESET}"
     return 1
 }
 
