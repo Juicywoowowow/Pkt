@@ -41,7 +41,10 @@ impl ContainerManager {
         let fs_path = self.storage.filesystem_path(name);
         fs::create_dir_all(&fs_path)?;
 
-        println!("✓ Container '{}' created (Python: {:?})", name, python_version);
+        println!(
+            "✓ Container '{}' created (Python: {:?})",
+            name, python_version
+        );
         Ok(())
     }
 
@@ -52,11 +55,18 @@ impl ContainerManager {
             return Err(anyhow!("Container '{}' is already running", name));
         }
 
+        let script = &config.script;
+        if !std::path::Path::new(script).exists() {
+            return Err(anyhow!(
+                "Script '{}' not found. Container may be corrupted.",
+                script
+            ));
+        }
+
         config.status = "running".to_string();
         config.port_mapping = port.clone();
         self.storage.save_config(&config)?;
 
-        let script = &config.script;
         let python_cmd = match config.python_version.as_str() {
             "Python2" => "python2",
             "Python3" => "python3",
@@ -78,10 +88,7 @@ impl ContainerManager {
 
         cmd.env("DOCK_CONTAINER", name);
 
-        let child = cmd
-            .stdout(log_file.try_clone()?)
-            .stderr(log_file)
-            .spawn()?;
+        let child = cmd.stdout(log_file.try_clone()?).stderr(log_file).spawn()?;
 
         println!("✓ Container '{}' started (PID: {})", name, child.id());
         if let Some(p) = port {
@@ -118,7 +125,10 @@ impl ContainerManager {
             return Ok(());
         }
 
-        println!("{:<20} {:<15} {:<20} {:<15}", "NAME", "STATUS", "PYTHON", "PORT");
+        println!(
+            "{:<20} {:<15} {:<20} {:<15}",
+            "NAME", "STATUS", "PYTHON", "PORT"
+        );
         println!("{}", "-".repeat(70));
 
         for config in containers {
@@ -181,6 +191,48 @@ impl ContainerManager {
 
         self.storage.delete_container(name)?;
         println!("✓ Container '{}' removed", name);
+        Ok(())
+    }
+
+    pub async fn update(&self) -> Result<()> {
+        println!("Checking for updates...");
+
+        let status = Command::new("git").arg("status").output()?;
+
+        if !status.status.success() {
+            return Err(anyhow!("Not in a git repository"));
+        }
+
+        let log = Command::new("git")
+            .arg("log")
+            .arg("-1")
+            .arg("--oneline")
+            .output()?;
+
+        let current = String::from_utf8_lossy(&log.stdout);
+        println!("Current: {}", current.trim());
+
+        println!("Pulling latest changes...");
+        let pull = Command::new("git").arg("pull").output()?;
+
+        if !pull.status.success() {
+            let err = String::from_utf8_lossy(&pull.stderr);
+            return Err(anyhow!("Git pull failed: {}", err));
+        }
+
+        println!("✓ Pulled latest changes");
+
+        println!("Rebuilding dock...");
+        let build = Command::new("bash").arg("build.sh").output()?;
+
+        if !build.status.success() {
+            let err = String::from_utf8_lossy(&build.stderr);
+            return Err(anyhow!("Build failed: {}", err));
+        }
+
+        println!("✓ Build successful");
+        println!("✓ Dock updated! Containers and data preserved.");
+
         Ok(())
     }
 }

@@ -50,6 +50,8 @@ pub enum Commands {
         /// Container name
         name: String,
     },
+    /// Update dock from git
+    Update,
 }
 
 impl Cli {
@@ -65,6 +67,7 @@ impl Cli {
             Commands::Enter { name } => manager.enter(&name).await?,
             Commands::Logs { name } => manager.logs(&name).await?,
             Commands::Remove { name } => manager.remove(&name).await?,
+            Commands::Update => manager.update().await?,
         }
 
         Ok(())
